@@ -30,7 +30,7 @@ state_token = str(st.session_state['oauth_state'])
 # 4. MAIN LOGIC
 if 'access_token' not in st.session_state:
     
-    # URL ENCODING: We use %20 for spaces
+    # URL ENCODING
     scopes = "read:recovery%20read:cycles%20read:sleep" 
     
     auth_link = (
@@ -45,7 +45,7 @@ if 'access_token' not in st.session_state:
     st.markdown("### 🔐 Authentication Required")
     st.markdown(f"To see your data, please authorize the app with Whoop:")
     
-    # --- THE FIX: target="_blank" opens a new tab to bypass Firefox security ---
+    # Open in New Tab for security
     st.markdown(f'<a href="{auth_link}" target="_blank" style="background-color:#E34935;color:white;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:bold;">👉 Login with Whoop (New Tab)</a>', unsafe_allow_html=True)
     st.info("Note: This will open a new tab. After you log in, your dashboard will appear in that NEW tab.")
 
@@ -82,19 +82,21 @@ else:
     headers = {"Authorization": f"Bearer {token}"}
     
     try:
-        # Fetching Data
-        response = requests.get("https://api.prod.whoop.com/developer/v1/recovery?limit=30", headers=headers)
+        # --- FIX: Changed limit from 30 to 25 ---
+        response = requests.get("https://api.prod.whoop.com/developer/v1/recovery?limit=25", headers=headers)
         
         if response.status_code == 200:
             data = response.json()['records']
             
             clean_data = []
             for item in data:
+                # Handle missing data gracefully
+                score = item.get('score', {})
                 clean_data.append({
                     "Date": item['date'],
-                    "Recovery Score": item['score']['recovery_score'],
-                    "HRV": item['score']['hrv_rmssd_milli'],
-                    "RHR": item['score']['resting_heart_rate']
+                    "Recovery Score": score.get('recovery_score', 0),
+                    "HRV": score.get('hrv_rmssd_milli', 0),
+                    "RHR": score.get('resting_heart_rate', 0)
                 })
             
             df = pd.DataFrame(clean_data)
@@ -107,8 +109,11 @@ else:
             
             # Chart
             fig = px.bar(df, x="Date", y="Recovery Score", color="Recovery Score", 
-                         title="Last 30 Days Recovery", color_continuous_scale=["red", "yellow", "green"])
+                         title="Last 25 Days Recovery", color_continuous_scale=["red", "yellow", "green"])
             st.plotly_chart(fig)
+            
+            with st.expander("View Raw Data"):
+                st.dataframe(df)
             
         else:
             st.error(f"Whoop API Error: {response.text}")
