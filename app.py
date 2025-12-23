@@ -47,7 +47,6 @@ if 'access_token' not in st.session_state:
     
     # Open in New Tab for security
     st.markdown(f'<a href="{auth_link}" target="_blank" style="background-color:#E34935;color:white;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:bold;">👉 Login with Whoop (New Tab)</a>', unsafe_allow_html=True)
-    st.info("Note: This will open a new tab. After you log in, your dashboard will appear in that NEW tab.")
 
     # Handle the return
     if "code" in st.query_params:
@@ -82,39 +81,21 @@ else:
     headers = {"Authorization": f"Bearer {token}"}
     
     try:
-        # --- FIX 1: UPDATE URL TO V2 ---
-        # We changed 'v1' to 'v2' in the URL below
-        response = requests.get("https://api.prod.whoop.com/developer/v2/recovery?limit=25", headers=headers)
+        # --- THE FIX: Back to V1, but with Limit=25 ---
+        response = requests.get("https://api.prod.whoop.com/developer/v1/recovery?limit=25", headers=headers)
         
         if response.status_code == 200:
             data = response.json()['records']
             
             clean_data = []
             for item in data:
-                # --- FIX 2: ROBUST DATA PARSING (V1 vs V2 Support) ---
-                # V2 data is "flat" (e.g. item['recovery_score']), V1 was nested (item['score']['recovery_score'])
-                # This logic checks both locations so it never crashes.
-                
-                # Check for Score (Try V2 location first, then V1 location)
-                rec_score = item.get('recovery_score')
-                if rec_score is None:
-                    rec_score = item.get('score', {}).get('recovery_score', 0)
-
-                # Check for HRV
-                hrv = item.get('hrv_rmssd_milli')
-                if hrv is None:
-                    hrv = item.get('score', {}).get('hrv_rmssd_milli', 0)
-
-                # Check for RHR
-                rhr = item.get('resting_heart_rate')
-                if rhr is None:
-                    rhr = item.get('score', {}).get('resting_heart_rate', 0)
-
+                # V1 Parsing Logic
+                score = item.get('score', {})
                 clean_data.append({
-                    "Date": item['date'], # or item['created_at']
-                    "Recovery Score": rec_score,
-                    "HRV": hrv,
-                    "RHR": rhr
+                    "Date": item['date'],
+                    "Recovery Score": score.get('recovery_score', 0),
+                    "HRV": score.get('hrv_rmssd_milli', 0),
+                    "RHR": score.get('resting_heart_rate', 0)
                 })
             
             if clean_data:
@@ -134,10 +115,9 @@ else:
                 with st.expander("View Raw Data"):
                     st.dataframe(df)
             else:
-                st.warning("No recovery records found. Make sure you have worn your Whoop recently!")
+                st.warning("No recovery records found.")
             
         else:
-            # Print the error clearly if it fails again
             st.error(f"Whoop API Error: {response.status_code}")
             st.code(response.text)
             
