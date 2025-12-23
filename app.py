@@ -65,13 +65,13 @@ else:
     token = st.session_state['access_token']
     headers = {"Authorization": f"Bearer {token}"}
     
-    # --- SECTION A: FETCH USER PROFILE ---
+    # --- SECTION A: FETCH USER PROFILE (V2 UPDATE) ---
     user_name = "Athlete"
     user_bio = ""
     
     try:
-        # We try to fetch the profile. If it fails (404), we skip it gracefully.
-        profile_url = "https://api.prod.whoop.com/developer/v1/user/profile"
+        # UPDATED: We use the new V2 endpoint for basic profile info
+        profile_url = "https://api.prod.whoop.com/developer/v2/user/profile/basic"
         profile_res = requests.get(profile_url, headers=headers)
         
         if profile_res.status_code == 200:
@@ -79,10 +79,10 @@ else:
             first = p_data.get('first_name', '')
             last = p_data.get('last_name', '')
             user_name = f"{first} {last}"
-            user_bio = f"📧 {p_data.get('email', 'No Email')} | 🆔 ID: {p_data.get('user_id', 'Unknown')}"
+            user_bio = f"📧 {p_data.get('email', 'No Email')}"
             
-            # Try to get Body Measurements (Separate Endpoint)
-            measure_url = "https://api.prod.whoop.com/developer/v1/user/measurement/body"
+            # Try to get Body Measurements (V2 Endpoint)
+            measure_url = "https://api.prod.whoop.com/developer/v2/user/measurement/body"
             measure_res = requests.get(measure_url, headers=headers)
             if measure_res.status_code == 200:
                 m_data = measure_res.json()
@@ -90,8 +90,12 @@ else:
                 weight = m_data.get('weight_kilogram', 0)
                 if height > 0 and weight > 0:
                      user_bio += f" | 📏 {height}m | ⚖️ {weight}kg"
-    except:
-        pass # If profile fails, we just stay as "Athlete"
+        else:
+            # Fallback debug message (Visible only if you expand the error)
+            print(f"Profile Error: {profile_res.status_code}")
+            
+    except Exception as e:
+        print(f"Profile Exception: {e}")
 
     # --- DISPLAY HEADER ---
     st.title(f"Welcome, {user_name} 👋")
@@ -100,8 +104,9 @@ else:
     
     st.markdown("---")
 
-    # --- SECTION B: FETCH CYCLE DATA (The Working Part) ---
+    # --- SECTION B: FETCH CYCLE DATA ---
     try:
+        # We use the V1 Cycle endpoint (as verified by your testing)
         url = "https://api.prod.whoop.com/developer/v1/cycle?limit=25"
         response = requests.get(url, headers=headers)
         
