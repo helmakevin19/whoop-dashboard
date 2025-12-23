@@ -27,8 +27,10 @@ if 'oauth_state' not in st.session_state:
 # 4. MAIN LOGIC
 if 'access_token' not in st.session_state:
     
-    # URL ENCODING (Added read:profile and read:body_measurement)
-    scopes = "read:cycles read:recovery read:sleep read:profile read:body_measurement" 
+    # --- FIX: SAFE SCOPES ONLY ---
+    # We removed 'read:body_measurement' and 'read:profile' because they caused your errors.
+    # We only ask for what we KNOW works: Cycles, Sleep, Recovery.
+    scopes = "read:cycles read:recovery read:sleep" 
     
     auth_link = (
         f"{AUTH_URL}"
@@ -42,7 +44,6 @@ if 'access_token' not in st.session_state:
     st.title("Whoop 5.0 Lifestyle Engine")
     st.markdown("### 🔐 Authentication Required")
     st.markdown(f'<a href="{auth_link}" target="_blank" style="background-color:#E34935;color:white;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:bold;">👉 Login with Whoop (New Tab)</a>', unsafe_allow_html=True)
-    st.info("Note: This will open a new tab. After you log in, your dashboard will appear in that NEW tab.")
 
     if "code" in st.query_params:
         code = st.query_params["code"]
@@ -65,48 +66,12 @@ else:
     token = st.session_state['access_token']
     headers = {"Authorization": f"Bearer {token}"}
     
-    # --- SECTION A: FETCH USER PROFILE (V2 UPDATE) ---
-    user_name = "Athlete"
-    user_bio = ""
-    
-    try:
-        # UPDATED: We use the new V2 endpoint for basic profile info
-        profile_url = "https://api.prod.whoop.com/developer/v2/user/profile/basic"
-        profile_res = requests.get(profile_url, headers=headers)
-        
-        if profile_res.status_code == 200:
-            p_data = profile_res.json()
-            first = p_data.get('first_name', '')
-            last = p_data.get('last_name', '')
-            user_name = f"{first} {last}"
-            user_bio = f"📧 {p_data.get('email', 'No Email')}"
-            
-            # Try to get Body Measurements (V2 Endpoint)
-            measure_url = "https://api.prod.whoop.com/developer/v2/user/measurement/body"
-            measure_res = requests.get(measure_url, headers=headers)
-            if measure_res.status_code == 200:
-                m_data = measure_res.json()
-                height = m_data.get('height_meter', 0)
-                weight = m_data.get('weight_kilogram', 0)
-                if height > 0 and weight > 0:
-                     user_bio += f" | 📏 {height}m | ⚖️ {weight}kg"
-        else:
-            # Fallback debug message (Visible only if you expand the error)
-            print(f"Profile Error: {profile_res.status_code}")
-            
-    except Exception as e:
-        print(f"Profile Exception: {e}")
-
-    # --- DISPLAY HEADER ---
-    st.title(f"Welcome, {user_name} 👋")
-    if user_bio:
-        st.caption(user_bio)
-    
+    st.title("Whoop Lifestyle Dashboard")
     st.markdown("---")
 
-    # --- SECTION B: FETCH CYCLE DATA ---
+    # --- FETCH DATA (Using V1 Cycle Endpoint) ---
     try:
-        # We use the V1 Cycle endpoint (as verified by your testing)
+        # This is the endpoint that your "Hunter" tool proved was working.
         url = "https://api.prod.whoop.com/developer/v1/cycle?limit=25"
         response = requests.get(url, headers=headers)
         
@@ -154,21 +119,4 @@ else:
                                        size="Calories", color="Strain",
                                        title="Higher Strain vs. Heart Rate",
                                        hover_data=['Date'])
-                st.plotly_chart(fig_scatter, use_container_width=True)
-                
-                with st.expander("View Raw Data Table"):
-                    st.dataframe(df)
-            else:
-                st.warning("No cycle records found.")
-            
-        else:
-            st.error(f"Cycle API Error: {response.status_code}")
-            
-    except Exception as e:
-        st.error(f"App Error: {e}")
-    
-    # Logout Button (Bottom)
-    st.markdown("---")
-    if st.button("Logout"):
-        del st.session_state['access_token']
-        st.rerun()
+                st.plotly_chart
