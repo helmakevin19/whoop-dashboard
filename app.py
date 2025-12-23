@@ -23,35 +23,36 @@ TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token"
 
 # --- FIX: ROBUST STATE GENERATION ---
 if 'oauth_state' not in st.session_state:
-    # Generate a random string of 16 characters
     st.session_state['oauth_state'] = secrets.token_urlsafe(16)
 
-# Force the token to be a string to avoid errors
 state_token = str(st.session_state['oauth_state'])
 
 # 4. MAIN LOGIC
 if 'access_token' not in st.session_state:
-    # --- DEBUGGING LINE (Verify this is not empty!) ---
-    st.caption(f"Security Token Generated: `{state_token}`") 
     
-    # Create the link with the state
+    # --- FIX THE BROKEN URL ---
+    # We use %20 instead of spaces so the link doesn't break
+    scopes = "read:recovery%20read:cycles%20read:sleep" 
+    
     auth_link = (
         f"{AUTH_URL}"
         f"?response_type=code"
         f"&client_id={CLIENT_ID}"
         f"&redirect_uri={REDIRECT_URI}"
-        f"&scope=read:recovery read:cycles read:sleep"
+        f"&scope={scopes}"
         f"&state={state_token}"
     )
     
-    # Use a clear, big button
-    st.markdown(f"## [👉 Click Here to Login with Whoop]({auth_link})", unsafe_allow_html=True)
+    st.markdown("### 🔐 Authentication Required")
+    st.markdown(f"To see your data, please authorize the app with Whoop:")
+    
+    # We use a clean HTML button instead of Markdown to be safer
+    st.markdown(f'<a href="{auth_link}" target="_self" style="background-color:#E34935;color:white;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:bold;">👉 Login with Whoop</a>', unsafe_allow_html=True)
 
-    # Handle the return from Whoop
+    # Handle the return
     if "code" in st.query_params:
         code = st.query_params["code"]
         
-        # Exchange code for token
         payload = {
             "grant_type": "authorization_code",
             "code": code,
@@ -68,13 +69,12 @@ if 'access_token' not in st.session_state:
             st.rerun()
         else:
             st.error(f"Login failed: {res.text}")
-            st.write("Troubleshooting: Check that your Redirect URI in Secrets matches Whoop Dashboard exactly.")
+            st.info(f"Troubleshooting: Ensure Redirect URI in Whoop Dashboard is EXACTLY: {REDIRECT_URI}")
 
 else:
     # 5. DASHBOARD (Logged In)
     st.success("✅ Connected to Whoop!")
     
-    # Logout button
     if st.button("Logout"):
         del st.session_state['access_token']
         st.rerun()
@@ -83,6 +83,7 @@ else:
     headers = {"Authorization": f"Bearer {token}"}
     
     try:
+        # Fetching Data
         response = requests.get("https://api.prod.whoop.com/developer/v1/recovery?limit=30", headers=headers)
         
         if response.status_code == 200:
