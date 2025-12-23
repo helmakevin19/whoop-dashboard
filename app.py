@@ -1,44 +1,40 @@
 import streamlit as st
 import requests
 import secrets
+import pandas as pd
 
-# --- DEBUGGING DASHBOARD ---
-st.set_page_config(page_title="Whoop Debugger", layout="wide")
-st.title("🛠️ Whoop Connection Debugger")
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="Whoop URL Hunter", layout="wide")
+st.title("🕵️ Whoop API 'URL Hunter'")
+st.markdown("This tool will force-test multiple API paths to find the one that works.")
 
-# 1. CHECK SECRETS
-st.write("### 1. Checking Configuration")
+# --- 1. SECRETS ---
 try:
     CLIENT_ID = st.secrets["CLIENT_ID"]
-    REDIRECT_URI = st.secrets["REDIRECT_URI"]
     CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
-    st.success(f"✅ Secrets found. Redirect URI: `{REDIRECT_URI}`")
+    REDIRECT_URI = st.secrets["REDIRECT_URI"]
 except:
-    st.error("❌ Secrets missing! Check Streamlit Settings.")
+    st.error("Secrets missing. Check Streamlit settings.")
     st.stop()
 
-# 2. AUTHENTICATION
+# --- 2. AUTHENTICATION ---
 if 'oauth_state' not in st.session_state:
     st.session_state['oauth_state'] = secrets.token_urlsafe(16)
 
+# AUTH URL (We know this works because you got the green box)
+AUTH_URL = "https://api.prod.whoop.com/oauth/oauth2/auth"
+TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token"
+
 if 'access_token' not in st.session_state:
-    st.write("### 2. Authentication Needed")
+    # Login Flow
+    scopes = "read:recovery read:cycles read:sleep read:profile" # No %20 here, we let requests handle it
+    auth_link = f"{AUTH_URL}?response_type=code&client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&scope={scopes}&state={st.session_state['oauth_state']}"
     
-    # We use the standard V1 endpoints
-    auth_url = "https://api.prod.whoop.com/oauth/oauth2/auth"
-    token_url = "https://api.prod.whoop.com/oauth/oauth2/token"
-    
-    scopes = "read:recovery%20read:cycles%20read:sleep%20read:profile"
-    state = st.session_state['oauth_state']
-    
-    link = f"{auth_url}?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope={scopes}&state={state}"
-    
-    st.markdown(f'<a href="{link}" target="_blank" style="background-color:#E34935;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;">👉 Login to Whoop (New Tab)</a>', unsafe_allow_html=True)
-    
+    st.info("Step 1: Authenticate to get a fresh token.")
+    st.markdown(f'<a href="{auth_link}" target="_blank" style="background-color:#E34935;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;">👉 Login (New Tab)</a>', unsafe_allow_html=True)
+
     if "code" in st.query_params:
         code = st.query_params["code"]
-        st.write("🔄 exchanging code for token...")
-        
         payload = {
             "grant_type": "authorization_code", 
             "code": code, 
@@ -46,49 +42,64 @@ if 'access_token' not in st.session_state:
             "client_secret": CLIENT_SECRET, 
             "redirect_uri": REDIRECT_URI
         }
-        
-        res = requests.post(token_url, data=payload)
-        st.write(f"Token Status: {res.status_code}")
-        
+        res = requests.post(TOKEN_URL, data=payload)
         if res.status_code == 200:
             st.session_state['access_token'] = res.json()['access_token']
             st.rerun()
         else:
-            st.error(f"❌ Auth Failed: {res.text}")
+            st.error(f"Auth Failed: {res.text}")
 
 else:
-    # 3. DIAGNOSTIC TESTS
-    st.success("✅ Authenticated! Running connectivity tests...")
-    
-    if st.button("Logout"):
-        del st.session_state['access_token']
-        st.rerun()
-
+    # --- 3. THE HUNT ---
+    st.success("✅ Token Acquired! Starting URL Hunt...")
     token = st.session_state['access_token']
     headers = {"Authorization": f"Bearer {token}"}
     
-    # TEST A: THE USER PROFILE (Simplest Endpoint)
-    st.subheader("Test A: User Profile")
-    url_profile = "https://api.prod.whoop.com/developer/v1/user/profile"
-    st.code(f"GET {url_profile}")
+    # These are the 4 most likely URL patterns for Whoop
+    candidates = [
+        # Option A: The "Standard" (worked once for you)
+        "https://api.prod.whoop.com/developer/v1/recovery?limit=10",
+        
+        # Option B: The "Short" (common alternate)
+        "https://api.prod.whoop.com/v1/recovery?limit=10",
+        
+        # Option C: The "User Profile" (simplest check)
+        "https://api.prod.whoop.com/developer/v1/user/profile",
+        
+        # Option D: The "Cycle" endpoint
+        "https://api.prod.whoop.com/developer/v1/cycle?limit=5"
+    ]
     
-    res_prof = requests.get(url_profile, headers=headers)
-    if res_prof.status_code == 200:
-        st.success(f"SUCCESS (200): Found user {res_prof.json().get('first_name', 'Unknown')}")
-    else:
-        st.error(f"FAILED ({res_prof.status_code}): {res_prof.text}")
+    results = []
+    
+    for url in candidates:
+        try:
+            r = requests.get(url, headers=headers)
+            status = r.status_code
+            
+            # Label the result
+            if status == 200:
+                outcome = "✅ SUCCESS"
+            elif status == 404:
+                outcome = "❌ 404 NOT FOUND"
+            elif status == 401:
+                outcome = "🚫 401 UNAUTHORIZED (Token Bad)"
+            else:
+                outcome = f"⚠️ {status} ERROR"
+                
+            results.append({
+                "URL Tested": url,
+                "Outcome": outcome,
+                "Response Sample": r.text[:100] # First 100 chars
+            })
+            
+        except Exception as e:
+            results.append({"URL Tested": url, "Outcome": "CRASH", "Response Sample": str(e)})
 
-    # TEST B: RECOVERY (The Problematic One)
-    st.subheader("Test B: Recovery Data")
-    # Trying without limit first to see if base URL works
-    url_recovery = "https://api.prod.whoop.com/developer/v1/recovery?limit=10"
-    st.code(f"GET {url_recovery}")
+    # Display Results Table
+    st.table(pd.DataFrame(results))
     
-    res_rec = requests.get(url_recovery, headers=headers)
-    
-    st.write("**Raw Server Response:**")
-    st.json({
-        "status_code": res_rec.status_code,
-        "url_requested": res_rec.url,
-        "response_body": res_rec.text[:500] # Show first 500 chars
-    })
+    # Logout to try again
+    if st.button("Logout / Try Again"):
+        del st.session_state['access_token']
+        st.rerun()
