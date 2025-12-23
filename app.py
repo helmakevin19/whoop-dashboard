@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import plotly.express as px
-import secrets  # <--- New tool for security
+import secrets
 
 # 1. PAGE SETUP
 st.set_page_config(page_title="My Whoop Dashboard", layout="wide")
@@ -17,28 +17,41 @@ except:
     st.error("Secrets not found! Please set them in Streamlit Cloud.")
     st.stop()
 
-# 3. AUTHENTICATION
+# 3. AUTHENTICATION URLS
 AUTH_URL = "https://api.prod.whoop.com/oauth/oauth2/auth"
 TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token"
 
-# Generate a random state key if it doesn't exist
+# --- FIX: ROBUST STATE GENERATION ---
 if 'oauth_state' not in st.session_state:
+    # Generate a random string of 16 characters
     st.session_state['oauth_state'] = secrets.token_urlsafe(16)
 
-if 'access_token' not in st.session_state:
-    # Step A: Create the Login Link with the new 'state' parameter
-    state_token = st.session_state['oauth_state']
-    
-    # We add &state={state_token} to the end of the URL
-    auth_link = f"{AUTH_URL}?response_type=code&client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&scope=read:recovery read:cycles read:sleep&state={state_token}"
-    
-    st.markdown(f"[🔐 **Click Here to Login with Whoop**]({auth_link})")
+# Force the token to be a string to avoid errors
+state_token = str(st.session_state['oauth_state'])
 
-    # Step B: Catch the return signal
+# 4. MAIN LOGIC
+if 'access_token' not in st.session_state:
+    # --- DEBUGGING LINE (Verify this is not empty!) ---
+    st.caption(f"Security Token Generated: `{state_token}`") 
+    
+    # Create the link with the state
+    auth_link = (
+        f"{AUTH_URL}"
+        f"?response_type=code"
+        f"&client_id={CLIENT_ID}"
+        f"&redirect_uri={REDIRECT_URI}"
+        f"&scope=read:recovery read:cycles read:sleep"
+        f"&state={state_token}"
+    )
+    
+    # Use a clear, big button
+    st.markdown(f"## [👉 Click Here to Login with Whoop]({auth_link})", unsafe_allow_html=True)
+
+    # Handle the return from Whoop
     if "code" in st.query_params:
         code = st.query_params["code"]
-        # (Optional) We could verify the returned state matches st.session_state['oauth_state'] here for extra security
         
+        # Exchange code for token
         payload = {
             "grant_type": "authorization_code",
             "code": code,
@@ -47,21 +60,29 @@ if 'access_token' not in st.session_state:
             "redirect_uri": REDIRECT_URI
         }
         
-        res = requests.post(TOKEN_URL, data=payload)
-        
+        with st.spinner("Logging in..."):
+            res = requests.post(TOKEN_URL, data=payload)
+            
         if res.status_code == 200:
             st.session_state['access_token'] = res.json()['access_token']
             st.rerun()
         else:
             st.error(f"Login failed: {res.text}")
+            st.write("Troubleshooting: Check that your Redirect URI in Secrets matches Whoop Dashboard exactly.")
+
 else:
-    # 4. IF LOGGED IN: FETCH DATA
-    st.success("Connected to Whoop!")
+    # 5. DASHBOARD (Logged In)
+    st.success("✅ Connected to Whoop!")
+    
+    # Logout button
+    if st.button("Logout"):
+        del st.session_state['access_token']
+        st.rerun()
+        
     token = st.session_state['access_token']
     headers = {"Authorization": f"Bearer {token}"}
     
     try:
-        # Get Recovery Data
         response = requests.get("https://api.prod.whoop.com/developer/v1/recovery?limit=30", headers=headers)
         
         if response.status_code == 200:
@@ -78,20 +99,19 @@ else:
             
             df = pd.DataFrame(clean_data)
             
-            # Metric Cards
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Avg Recovery", f"{df['Recovery Score'].mean():.0f}%")
-            c2.metric("Avg HRV", f"{df['HRV'].mean():.0f}")
-            c3.metric("Avg RHR", f"{df['RHR'].mean():.0f}")
+            # KPI Row
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Avg Recovery", f"{df['Recovery Score'].mean():.0f}%")
+            col2.metric("Avg HRV", f"{df['HRV'].mean():.0f}")
+            col3.metric("Avg RHR", f"{df['RHR'].mean():.0f}")
             
             # Chart
             fig = px.bar(df, x="Date", y="Recovery Score", color="Recovery Score", 
                          title="Last 30 Days Recovery", color_continuous_scale=["red", "yellow", "green"])
             st.plotly_chart(fig)
             
-            st.dataframe(df)
         else:
-            st.error(f"Error from Whoop: {response.text}")
+            st.error(f"Whoop API Error: {response.text}")
             
     except Exception as e:
-        st.error(f"Something went wrong: {e}")
+        st.error(f"App Error: {e}")
