@@ -119,4 +119,22 @@ else:
                                        size="Calories", color="Strain",
                                        title="Higher Strain vs. Heart Rate",
                                        hover_data=['Date'])
-                st.plotly_chart
+                st.plotly_chart(fig_scatter, use_container_width=True)
+                
+                with st.expander("View Raw Data Table"):
+                    st.dataframe(df)
+            else:
+                st.warning("No cycle records found.")
+            
+        else:
+            st.error(f"API Error: {response.status_code}")
+            st.text(response.text)
+            
+    except Exception as e:
+        st.error(f"App Error: {e}")
+    
+    # Logout Button
+    st.markdown("---")
+    if st.button("Logout"):
+        del st.session_state['access_token']
+        st.rerun()
