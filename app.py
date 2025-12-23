@@ -42,7 +42,6 @@ if 'access_token' not in st.session_state:
     
     st.markdown("### 🔐 Authentication Required")
     st.markdown(f'<a href="{auth_link}" target="_blank" style="background-color:#E34935;color:white;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:bold;">👉 Login with Whoop (New Tab)</a>', unsafe_allow_html=True)
-    st.info("Note: This will open a new tab. After you log in, your dashboard will appear in that NEW tab.")
 
     if "code" in st.query_params:
         code = st.query_params["code"]
@@ -73,8 +72,7 @@ else:
     
     try:
         # --- THE WORKING ENDPOINT: CYCLE ---
-        # We use the endpoint that your screenshot proved was working
-        url = "https://api.prod.whoop.com/developer/v1/cycle?limit=20"
+        url = "https://api.prod.whoop.com/developer/v1/cycle?limit=25"
         
         response = requests.get(url, headers=headers)
         
@@ -83,12 +81,21 @@ else:
             
             clean_data = []
             for item in data:
-                # CYCLE PARSING LOGIC
-                # Cycles contain Strain and Calories
+                # --- FIX: ROBUST DATE PARSING ---
+                # Try 'start', if missing try 'created_at', if both missing use 'Unknown'
+                date_raw = item.get('start') or item.get('created_at')
+                
+                if date_raw:
+                    # Keep just the YYYY-MM-DD part
+                    date_pretty = date_raw[:10]
+                else:
+                    date_pretty = "Unknown"
+
+                # Parse Scores
                 score = item.get('score', {})
                 
                 clean_data.append({
-                    "Date": item['start_time'][:10], # Grab just the date part
+                    "Date": date_pretty, 
                     "Strain": score.get('strain', 0),
                     "Calories": score.get('kilojoule', 0) / 4.184, # Convert kJ to Kcal
                     "Avg Heart Rate": score.get('average_heart_rate', 0),
@@ -97,7 +104,8 @@ else:
             
             if clean_data:
                 df = pd.DataFrame(clean_data)
-                df = df.sort_values(by="Date") # Ensure timeline is correct
+                # Sort by date so the chart flows left-to-right
+                df = df.sort_values(by="Date") 
                 
                 # KPI Row
                 col1, col2, col3 = st.columns(3)
@@ -105,29 +113,30 @@ else:
                 col2.metric("Avg Calories", f"{df['Calories'].mean():.0f} kcal")
                 col3.metric("Max HR (Peak)", f"{df['Max Heart Rate'].max():.0f} bpm")
                 
-                # CHART 1: STRAIN (Work Load)
+                # CHART 1: STRAIN
+                st.subheader("Daily Strain Load")
                 fig_strain = px.bar(df, x="Date", y="Strain", 
-                             title="Daily Strain (Work Load)", 
                              color="Strain",
                              color_continuous_scale=["lightblue", "blue", "purple"])
                 st.plotly_chart(fig_strain, use_container_width=True)
 
                 # CHART 2: CARDIO EFFICIENCY
-                # (Comparing Strain vs Avg Heart Rate)
                 st.subheader("Cardiovascular Efficiency")
                 fig_scatter = px.scatter(df, x="Avg Heart Rate", y="Strain",
                                        size="Calories", color="Strain",
-                                       title="Are you working harder with less heart effort?")
+                                       title="Higher Strain vs. Heart Rate",
+                                       hover_data=['Date'])
                 st.plotly_chart(fig_scatter, use_container_width=True)
                 
-                with st.expander("View Raw Cycle Data"):
+                with st.expander("View Raw Data Table"):
                     st.dataframe(df)
             else:
-                st.warning("No cycle records found.")
+                st.warning("No cycle records found. Have you worn your Whoop today?")
             
         else:
             st.error(f"Whoop API Error: {response.status_code}")
-            st.code(response.text)
+            # Debugging helper: print what we actually got
+            st.write("Server Response:", response.text)
             
     except Exception as e:
         st.error(f"App Error: {e}")
