@@ -82,41 +82,64 @@ else:
     headers = {"Authorization": f"Bearer {token}"}
     
     try:
-        # --- FIX: Changed limit from 30 to 25 ---
-        response = requests.get("https://api.prod.whoop.com/developer/v1/recovery?limit=25", headers=headers)
+        # --- FIX 1: UPDATE URL TO V2 ---
+        # We changed 'v1' to 'v2' in the URL below
+        response = requests.get("https://api.prod.whoop.com/developer/v2/recovery?limit=25", headers=headers)
         
         if response.status_code == 200:
             data = response.json()['records']
             
             clean_data = []
             for item in data:
-                # Handle missing data gracefully
-                score = item.get('score', {})
+                # --- FIX 2: ROBUST DATA PARSING (V1 vs V2 Support) ---
+                # V2 data is "flat" (e.g. item['recovery_score']), V1 was nested (item['score']['recovery_score'])
+                # This logic checks both locations so it never crashes.
+                
+                # Check for Score (Try V2 location first, then V1 location)
+                rec_score = item.get('recovery_score')
+                if rec_score is None:
+                    rec_score = item.get('score', {}).get('recovery_score', 0)
+
+                # Check for HRV
+                hrv = item.get('hrv_rmssd_milli')
+                if hrv is None:
+                    hrv = item.get('score', {}).get('hrv_rmssd_milli', 0)
+
+                # Check for RHR
+                rhr = item.get('resting_heart_rate')
+                if rhr is None:
+                    rhr = item.get('score', {}).get('resting_heart_rate', 0)
+
                 clean_data.append({
-                    "Date": item['date'],
-                    "Recovery Score": score.get('recovery_score', 0),
-                    "HRV": score.get('hrv_rmssd_milli', 0),
-                    "RHR": score.get('resting_heart_rate', 0)
+                    "Date": item['date'], # or item['created_at']
+                    "Recovery Score": rec_score,
+                    "HRV": hrv,
+                    "RHR": rhr
                 })
             
-            df = pd.DataFrame(clean_data)
-            
-            # KPI Row
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Avg Recovery", f"{df['Recovery Score'].mean():.0f}%")
-            col2.metric("Avg HRV", f"{df['HRV'].mean():.0f}")
-            col3.metric("Avg RHR", f"{df['RHR'].mean():.0f}")
-            
-            # Chart
-            fig = px.bar(df, x="Date", y="Recovery Score", color="Recovery Score", 
-                         title="Last 25 Days Recovery", color_continuous_scale=["red", "yellow", "green"])
-            st.plotly_chart(fig)
-            
-            with st.expander("View Raw Data"):
-                st.dataframe(df)
+            if clean_data:
+                df = pd.DataFrame(clean_data)
+                
+                # KPI Row
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Avg Recovery", f"{df['Recovery Score'].mean():.0f}%")
+                col2.metric("Avg HRV", f"{df['HRV'].mean():.0f}")
+                col3.metric("Avg RHR", f"{df['RHR'].mean():.0f}")
+                
+                # Chart
+                fig = px.bar(df, x="Date", y="Recovery Score", color="Recovery Score", 
+                             title="Last 25 Days Recovery", color_continuous_scale=["red", "yellow", "green"])
+                st.plotly_chart(fig)
+                
+                with st.expander("View Raw Data"):
+                    st.dataframe(df)
+            else:
+                st.warning("No recovery records found. Make sure you have worn your Whoop recently!")
             
         else:
-            st.error(f"Whoop API Error: {response.text}")
+            # Print the error clearly if it fails again
+            st.error(f"Whoop API Error: {response.status_code}")
+            st.code(response.text)
             
     except Exception as e:
         st.error(f"App Error: {e}")
