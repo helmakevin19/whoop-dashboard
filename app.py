@@ -6,7 +6,6 @@ import secrets
 
 # 1. PAGE SETUP
 st.set_page_config(page_title="Whoop 5.0 Lifestyle Engine", layout="wide")
-st.title("Whoop 5.0 Lifestyle Engine")
 
 # 2. GET SECRETS
 try:
@@ -28,8 +27,8 @@ if 'oauth_state' not in st.session_state:
 # 4. MAIN LOGIC
 if 'access_token' not in st.session_state:
     
-    # URL ENCODING
-    scopes = "read:cycles read:recovery read:sleep read:profile" 
+    # URL ENCODING (Added read:profile and read:body_measurement)
+    scopes = "read:cycles read:recovery read:sleep read:profile read:body_measurement" 
     
     auth_link = (
         f"{AUTH_URL}"
@@ -40,8 +39,10 @@ if 'access_token' not in st.session_state:
         f"&state={st.session_state['oauth_state']}"
     )
     
+    st.title("Whoop 5.0 Lifestyle Engine")
     st.markdown("### 🔐 Authentication Required")
     st.markdown(f'<a href="{auth_link}" target="_blank" style="background-color:#E34935;color:white;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:bold;">👉 Login with Whoop (New Tab)</a>', unsafe_allow_html=True)
+    st.info("Note: This will open a new tab. After you log in, your dashboard will appear in that NEW tab.")
 
     if "code" in st.query_params:
         code = st.query_params["code"]
@@ -61,19 +62,47 @@ if 'access_token' not in st.session_state:
 
 else:
     # 5. DASHBOARD (Logged In)
-    st.success("✅ Connected to Whoop!")
-    
-    if st.button("Logout"):
-        del st.session_state['access_token']
-        st.rerun()
-        
     token = st.session_state['access_token']
     headers = {"Authorization": f"Bearer {token}"}
     
+    # --- SECTION A: FETCH USER PROFILE ---
+    user_name = "Athlete"
+    user_bio = ""
+    
     try:
-        # --- THE WORKING ENDPOINT: CYCLE ---
-        url = "https://api.prod.whoop.com/developer/v1/cycle?limit=25"
+        # We try to fetch the profile. If it fails (404), we skip it gracefully.
+        profile_url = "https://api.prod.whoop.com/developer/v1/user/profile"
+        profile_res = requests.get(profile_url, headers=headers)
         
+        if profile_res.status_code == 200:
+            p_data = profile_res.json()
+            first = p_data.get('first_name', '')
+            last = p_data.get('last_name', '')
+            user_name = f"{first} {last}"
+            user_bio = f"📧 {p_data.get('email', 'No Email')} | 🆔 ID: {p_data.get('user_id', 'Unknown')}"
+            
+            # Try to get Body Measurements (Separate Endpoint)
+            measure_url = "https://api.prod.whoop.com/developer/v1/user/measurement/body"
+            measure_res = requests.get(measure_url, headers=headers)
+            if measure_res.status_code == 200:
+                m_data = measure_res.json()
+                height = m_data.get('height_meter', 0)
+                weight = m_data.get('weight_kilogram', 0)
+                if height > 0 and weight > 0:
+                     user_bio += f" | 📏 {height}m | ⚖️ {weight}kg"
+    except:
+        pass # If profile fails, we just stay as "Athlete"
+
+    # --- DISPLAY HEADER ---
+    st.title(f"Welcome, {user_name} 👋")
+    if user_bio:
+        st.caption(user_bio)
+    
+    st.markdown("---")
+
+    # --- SECTION B: FETCH CYCLE DATA (The Working Part) ---
+    try:
+        url = "https://api.prod.whoop.com/developer/v1/cycle?limit=25"
         response = requests.get(url, headers=headers)
         
         if response.status_code == 200:
@@ -81,30 +110,23 @@ else:
             
             clean_data = []
             for item in data:
-                # --- FIX: ROBUST DATE PARSING ---
-                # Try 'start', if missing try 'created_at', if both missing use 'Unknown'
+                # Date Parsing
                 date_raw = item.get('start') or item.get('created_at')
-                
-                if date_raw:
-                    # Keep just the YYYY-MM-DD part
-                    date_pretty = date_raw[:10]
-                else:
-                    date_pretty = "Unknown"
+                date_pretty = date_raw[:10] if date_raw else "Unknown"
 
-                # Parse Scores
+                # Score Parsing
                 score = item.get('score', {})
                 
                 clean_data.append({
                     "Date": date_pretty, 
                     "Strain": score.get('strain', 0),
-                    "Calories": score.get('kilojoule', 0) / 4.184, # Convert kJ to Kcal
+                    "Calories": score.get('kilojoule', 0) / 4.184, 
                     "Avg Heart Rate": score.get('average_heart_rate', 0),
                     "Max Heart Rate": score.get('max_heart_rate', 0)
                 })
             
             if clean_data:
                 df = pd.DataFrame(clean_data)
-                # Sort by date so the chart flows left-to-right
                 df = df.sort_values(by="Date") 
                 
                 # KPI Row
@@ -117,6 +139,7 @@ else:
                 st.subheader("Daily Strain Load")
                 fig_strain = px.bar(df, x="Date", y="Strain", 
                              color="Strain",
+                             title="Workload by Day",
                              color_continuous_scale=["lightblue", "blue", "purple"])
                 st.plotly_chart(fig_strain, use_container_width=True)
 
@@ -131,12 +154,16 @@ else:
                 with st.expander("View Raw Data Table"):
                     st.dataframe(df)
             else:
-                st.warning("No cycle records found. Have you worn your Whoop today?")
+                st.warning("No cycle records found.")
             
         else:
-            st.error(f"Whoop API Error: {response.status_code}")
-            # Debugging helper: print what we actually got
-            st.write("Server Response:", response.text)
+            st.error(f"Cycle API Error: {response.status_code}")
             
     except Exception as e:
         st.error(f"App Error: {e}")
+    
+    # Logout Button (Bottom)
+    st.markdown("---")
+    if st.button("Logout"):
+        del st.session_state['access_token']
+        st.rerun()
