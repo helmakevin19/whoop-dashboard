@@ -21,7 +21,7 @@ except:
 AUTH_URL = "https://api.prod.whoop.com/oauth/oauth2/auth"
 TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token"
 
-# --- FIX: ROBUST STATE GENERATION ---
+# --- SECURITY: STATE GENERATION ---
 if 'oauth_state' not in st.session_state:
     st.session_state['oauth_state'] = secrets.token_urlsafe(16)
 
@@ -30,8 +30,7 @@ state_token = str(st.session_state['oauth_state'])
 # 4. MAIN LOGIC
 if 'access_token' not in st.session_state:
     
-    # --- FIX THE BROKEN URL ---
-    # We use %20 instead of spaces so the link doesn't break
+    # URL ENCODING: We use %20 for spaces
     scopes = "read:recovery%20read:cycles%20read:sleep" 
     
     auth_link = (
@@ -46,8 +45,9 @@ if 'access_token' not in st.session_state:
     st.markdown("### 🔐 Authentication Required")
     st.markdown(f"To see your data, please authorize the app with Whoop:")
     
-    # We use a clean HTML button instead of Markdown to be safer
-    st.markdown(f'<a href="{auth_link}" target="_self" style="background-color:#E34935;color:white;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:bold;">👉 Login with Whoop</a>', unsafe_allow_html=True)
+    # --- THE FIX: target="_blank" opens a new tab to bypass Firefox security ---
+    st.markdown(f'<a href="{auth_link}" target="_blank" style="background-color:#E34935;color:white;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:bold;">👉 Login with Whoop (New Tab)</a>', unsafe_allow_html=True)
+    st.info("Note: This will open a new tab. After you log in, your dashboard will appear in that NEW tab.")
 
     # Handle the return
     if "code" in st.query_params:
@@ -69,7 +69,6 @@ if 'access_token' not in st.session_state:
             st.rerun()
         else:
             st.error(f"Login failed: {res.text}")
-            st.info(f"Troubleshooting: Ensure Redirect URI in Whoop Dashboard is EXACTLY: {REDIRECT_URI}")
 
 else:
     # 5. DASHBOARD (Logged In)
